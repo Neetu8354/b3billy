@@ -303,6 +303,90 @@ const IV_CSS = `
 @keyframes ivPop { from { opacity:0; transform:scale(.94) } to { opacity:1; transform:none } }
 `;
 
+/* ---------- drag & drop media ---------- */
+export const MEDIA_LIMITS = { image: 5 * 1024 * 1024, video: 50 * 1024 * 1024 }; // must mirror the send-media routes
+
+export function splitMedia(files) {
+  const items = [];
+  let error = null;
+  for (const f of Array.from(files || [])) {
+    const kind = f.type?.startsWith("image/") ? "image" : f.type?.startsWith("video/") ? "video" : null;
+    if (!kind) error = "Only images and videos can be sent";
+    else if (f.size > MEDIA_LIMITS[kind]) error = kind === "image" ? "Image is over 5MB" : "Video is over 50MB";
+    else items.push({ kind, file: f });
+  }
+  if (!items.length && !error) error = "No supported files";
+  return { items, error };
+}
+
+/* dragenter/leave fire as the cursor crosses child elements — a depth counter
+   keeps the overlay from flickering */
+export function useFileDrop(onFiles) {
+  const [dragging, setDragging] = useState(false);
+  const depth = useRef(0);
+  const cb = useRef(onFiles);
+  cb.current = onFiles;
+  const hasFiles = (e) => Array.from(e.dataTransfer?.types || []).includes("Files");
+  const dropProps = {
+    onDragEnter: (e) => {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      depth.current += 1;
+      setDragging(true);
+    },
+    onDragOver: (e) => {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "copy";
+    },
+    onDragLeave: (e) => {
+      if (!hasFiles(e)) return;
+      depth.current = Math.max(0, depth.current - 1);
+      if (!depth.current) setDragging(false);
+    },
+    onDrop: (e) => {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      depth.current = 0;
+      setDragging(false);
+      cb.current?.(e.dataTransfer.files);
+    },
+  };
+  useEffect(() => {
+    const stop = (e) => e.preventDefault(); // an outside drop must not navigate away
+    window.addEventListener("dragover", stop);
+    window.addEventListener("drop", stop);
+    return () => {
+      window.removeEventListener("dragover", stop);
+      window.removeEventListener("drop", stop);
+    };
+  }, []);
+  return { dragging, dropProps };
+}
+
+/* pointer-events:none lets drops land on the container under this veil */
+export function DropOverlay() {
+  return (
+    <div
+      style={{
+        position: "fixed", inset: 0, zIndex: 4000, pointerEvents: "none",
+        background: "rgba(11,20,26,.72)", display: "flex", alignItems: "center", justifyContent: "center", padding: 24,
+      }}
+    >
+      <div
+        style={{
+          border: "3px dashed #ff5a2e", borderRadius: 18, padding: "40px 56px",
+          textAlign: "center", color: "#fff", background: "rgba(255,255,255,.06)",
+        }}
+      >
+        <i className="fas fa-images" style={{ fontSize: 46, display: "block", marginBottom: 14 }} />
+        <div style={{ fontSize: 17, fontWeight: 600 }}>Drop images or videos to send</div>
+        <div style={{ fontSize: 12.5, opacity: 0.75, marginTop: 6 }}>Preview opens before sending</div>
+      </div>
+    </div>
+  );
+}
+
 export function ImageViewer({ src, caption, onClose }) {
   useEffect(() => {
     const f = (e) => e.key === "Escape" && onClose();

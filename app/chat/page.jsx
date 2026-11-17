@@ -8,6 +8,7 @@ import { CALL_CSS, CallOverlay, useVoiceCall } from "@/components/CallUI";
 import {
   Tick, MsgText, StickerMsg, VoicePlayer, CallEventRow,
   EmojiGrid, StickerPicker, MediaComposer, Sheet, ImageViewer,
+  useFileDrop, DropOverlay, splitMedia,
 } from "@/components/ChatBits";
 import {
   api, fmtTime, fmtDay, fmtAgo, sfx, isSticker, callInfo, avatarFor,
@@ -186,6 +187,7 @@ export default function ChatPage() {
   const [menuFor, setMenuFor] = useState(null);
   const [toast, setToast] = useState(null);
   const [composer, setComposer] = useState(null); // {kind:'image'|'video', file}
+  const [mediaQueue, setMediaQueue] = useState([]); // dropped files waiting for their own caption
   const [rec, setRec] = useState(null); // {secs}
   const [upload, setUpload] = useState(null); // {label, pct}
   const [gone, setGone] = useState(false);
@@ -453,6 +455,26 @@ export default function ChatPage() {
     setComposer({ kind, file });
   };
 
+  /* dropped / pasted files: first one opens the composer, the rest queue up
+     so each gets its own caption — cancel exits the whole queue */
+  const openFiles = (files) => {
+    const { items, error } = splitMedia(files);
+    if (error) showToast(error, "error");
+    if (!items.length) return;
+    setComposer(items[0]);
+    setMediaQueue(items.slice(1));
+  };
+
+  const nextQueued = () => {
+    setMediaQueue((q) => {
+      const [next, ...rest] = q;
+      if (next) setComposer(next);
+      return rest;
+    });
+  };
+
+  const { dragging, dropProps } = useFileDrop(openFiles);
+
   /* ---------- voice recording ---------- */
   const toggleRec = async () => {
     if (recRef.current) {
@@ -638,7 +660,7 @@ export default function ChatPage() {
     <>
       <style>{CSS + CALL_CSS}</style>
       <VisitBeacon />
-      <div className="chat-root">
+      <div className="chat-root" {...dropProps}>
         <header className="wa-header">
           <a className="wa-back" href="/social">
             <i className="fas fa-arrow-left" />
@@ -750,6 +772,10 @@ export default function ChatPage() {
                 value={text}
                 onChange={(e) => onType(e.target.value)}
                 placeholder={editing ? "Edit message..." : "Type a message..."}
+                onPaste={(e) => {
+                  const files = e.clipboardData?.files;
+                  if (files?.length) { e.preventDefault(); openFiles(files); }
+                }}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && !e.shiftKey) {
                     e.preventDefault();
@@ -780,14 +806,16 @@ export default function ChatPage() {
             kind={composer.kind}
             file={composer.file}
             sending={!!upload}
-            onCancel={() => setComposer(null)}
+            onCancel={() => { setComposer(null); setMediaQueue([]); }}
             onSend={(caption) => {
               const c = composer;
               setComposer(null);
               uploadMedia(c.kind, c.file, caption);
+              nextQueued();
             }}
           />
         )}
+        {dragging && <DropOverlay />}
 
         {viewer && <ImageViewer src={viewer.src} caption={viewer.caption} onClose={() => setViewer(null)} />}
         {menuFor && <Sheet items={msgActions} onClose={() => setMenuFor(null)} />}
