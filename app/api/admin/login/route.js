@@ -13,20 +13,21 @@ export async function POST(req) {
   let token = null;
   let role = null;
   let credsOk = false;
+  let sessErr = null;
   if (username === ADMIN_USER && password === ADMIN_PASS) {
     credsOk = true;
-    token = await newAdminSession(null); // main admin
+    ({ token, error: sessErr } = await newAdminSession(null)); // main admin
     role = "main";
   } else {
     const agent = await agentLogin(username, password);
     if (agent) {
       credsOk = true;
-      token = await newAdminSession(agent.id);
+      ({ token, error: sessErr } = await newAdminSession(agent.id));
       role = "agent";
     }
   }
   if (!token) {
-    if (credsOk) return Response.json({ success: false, error: "Session store unavailable — check server logs" }, { status: 500 });
+    if (credsOk) return Response.json({ success: false, error: `Session store unavailable: ${sessErr || "unknown"}` }, { status: 500 });
     return Response.json({ success: false, error: "Invalid credentials" }, { status: 401 });
   }
   const res = NextResponse.json({ success: true, role });
